@@ -17,8 +17,8 @@ int main(void){
   float* w_2 = malloc((N+1)*sizeof(float));
   float* w_3 = malloc((N+1)*sizeof(float));
      
-
-  for(int i = 0; i<(N+1); i++){
+  int i;
+  for(i = 0; i<(N+1); i++){
     if(i<(N/2+1)){
       w_1[i]  = 1.0/0.1;
       w_2[i]  = 0.0;
@@ -33,7 +33,7 @@ int main(void){
 
   Lax_Wendroff(w_1,w_2,w_3);
 
-  for(int i = 0; i<(N+1); i++){
+  for(i = 0; i<(N+1); i++){
     printf("%f\t%f\t%f\n",w_1[i],((2.0/5)*(w_3[i]-(w_2[i]*w_2[i])/(2*w_1[i]))),w_2[i]/w_1[i]);
   }
 
@@ -58,7 +58,8 @@ float F3(float w1, float w2, float w3){
 }
 float max_calculator(float *arr){
   float max = arr[0];
-  for(int i = 1; i<N; i++){
+  int i;
+  for(i = 1; i<N; i++){
     if(arr[i]>max){
       max  = arr[i];
     }
@@ -67,7 +68,8 @@ float max_calculator(float *arr){
 }
 float time_step_calculator(float cfl,float* w1, float* w2, float* w3,float dx){
   float w_dt[N]; 
-  for(int i = 0; i<N; i++){
+  int i;
+  for(i = 0; i<N; i++){
     float t = (float) fabs(w2[i]/w1[i]) + pow((14.0/25)*((w3[i]/w1[i]) - (w2[i]*w2[i])/(2*w1[i]*w1[i])),0.5);
     w_dt[i] = t; 
   }
@@ -89,8 +91,8 @@ void Lax_Wendroff(float* w1, float* w2, float* w3){
   while( n < 5600 ){
     
     float dt = time_step_calculator(0.1,w1,w2,w3,dx); 
-
-    for(int j = 0; j<(N-1); j++ ){
+	int j;
+    for(j = 0; j<(N-1); j++ ){
       w_medios_1_p = ((w1[j]+w1[j+1])/2.0) - (1.0/2)*(dt/dx)*(F1(w1[j+1],w2[j+1],w3[j+1]) - F1(w1[j],w2[j],w3[j]));
       w_medios_1_f = ((w1[j+1]+w1[j+2])/2.0) - (1.0/2)*(dt/dx)*(F1(w1[j+2],w2[j+2],w3[j+2]) - F1(w1[j+1],w2[j+1],w3[j+1]));
       
@@ -104,7 +106,8 @@ void Lax_Wendroff(float* w1, float* w2, float* w3){
       temp_2[j]= w2[j+1] - (dt/dx)*(F2(w_medios_1_f,w_medios_2_f,w_medios_3_f) - F2(w_medios_1_p,w_medios_2_p,w_medios_3_p));
       temp_3[j]= w3[j+1] - (dt/dx)*(F3(w_medios_1_f,w_medios_2_f,w_medios_3_f) - F3(w_medios_1_p,w_medios_2_p,w_medios_3_p));
     }
-    for(int j = 0; j<(N-1); j++){
+    
+    for(j = 0; j<(N-1); j++){
       w1[j+1] = temp_1[j];
       w2[j+1] = temp_2[j];
       w3[j+1] = temp_3[j];
