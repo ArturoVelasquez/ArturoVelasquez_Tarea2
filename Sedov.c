@@ -38,8 +38,11 @@ FLOAT*** allocate3d();
 FLOAT evolve(FLOAT inv_vel);
 void get_radius();
 void save();
+FLOAT get_axis_flux( int i, int j, int k, int axis, int n );
+FLOAT flux_limiter( FLOAT r );
 // Actual radius of the blast wave
 FLOAT radius = -1;
+FLOAT time;
 
 //------------------------------------------------------------------------------
 //   GLOBAL VARIABLES
@@ -73,7 +76,7 @@ FLOAT**** U;
 FLOAT***** F;
 // File to write 
 FILE* density;
-FILE* energy;
+FILE* times;
 
 //------------------------------------------------------------------------------
 //   MAIN
@@ -89,9 +92,9 @@ int main(int argc, char** argv){
 	// Initial gas density is calculated withstate equations rho*R*T = p (((((R is normal constant over molecular mass)))))
 	rho_ini = p_ini/(R*T);
 	// Blast is defined J/kg
-	blast = pow(10.0,10.0);
-	// N is defined (2 more for phantom) 
-	N = ((FLOAT)L)/((FLOAT)resol) + 2;
+	blast = pow(10.0,8.0);
+	// N is defined (2 more for phantom 
+	N = ((FLOAT)L)/((FLOAT)resol) + 4;
 	halfN = N/2;
 	// Variables are allocated
 	allocateAll();
@@ -101,7 +104,7 @@ int main(int argc, char** argv){
 	printf("aal iis weell (INITIALIZATION)\n");
 	// File to write
 	density = fopen("Density_sedov.data","w");
-	energy = fopen("energy_sedov.data","w");
+	times = fopen("Times_sedov.data","w");
 
 
 	   ///////////////////////////
@@ -109,28 +112,31 @@ int main(int argc, char** argv){
 	 ///////////////////////////
 
 	// Time variable t, deltas in position and time: dx,dt
-	FLOAT time = 0;
+	time = 0;
 	FLOAT dx = resol;
 	// Stores inverse of velocity ((((initial velocity is equal to sqrt(gamma*R*T))))
 	FLOAT p_blast = rho_ini*((gamma-1)*blast);
 	FLOAT inv_vel = 1.0/sqrt(gamma*p_blast/rho_ini);
 	bool go_on = true;
 	int ji = 0;
+	
 	do{	
 		// Evolves vector U, actualizes dt
-		printf("%f____%f____%f,\n",time,dx*inv_vel,radius);
+		printf("%f____%f____%f__________________%f,%f\n",time,dx*inv_vel,radius,U[0][halfN+5][halfN][halfN],U[1][halfN+5][halfN][halfN]);
 		inv_vel = evolve(inv_vel);
 		printf("aal iis weell (EVOLVE)\n");
 		// 1/inv_vel = vel = dx/dt
 		time+=dx*inv_vel;
-		save();
+		//save();
+		get_radius();
 
-		if(ji>20){ go_on = false;}
+		if(ji>40){ go_on = false;}
 		ji++;
 
 	} while(go_on);
+
 	fclose(density);
-	fclose(energy);
+	fclose(times);
 	return 0;
 }
 
@@ -223,10 +229,9 @@ void __init__(){
  * Evolves vector U and actualizes vector F afterwards, given dx and dt according to the finite volume method
  * Finite volume is performed over a volume-centered cubic uniform grid
  * Volume integrals are approximated given variables constant over finite volumes
- * Surface integrals are approximated given variables constant over square surfaces
- * Values of variables on surfaces are calculated as the mean of the adjacent volumes
+ * Surface integrals are calculated according to TVD scheme with Roe approximations and superbee flux limiter
  * Boundary conditions are taken as free boundary :
- * (directional derivative perpendicular to the boundary surface vanishes) (This vanishes the respective surface integral)
+ * (directional derivative perpendicular to the boundary surface vanishes) -> ghost cells needed
  * !!!RETURN!!! This method returns the inverse of maximum velocity for the other time step
  *
  */
@@ -248,14 +253,12 @@ FLOAT evolve(FLOAT inv_vel){
 	 //   Evolution of Unew    //
 	////////////////////////////
 	
-
-	for( l = 0; l < 5; l++){
-		for( i = 1; i < N-1; i++){
-			for( j = 1; j < N-1; j++){
-				for( k = 1; k < N-1; k++){
-
-					U_new[l][i][j][k]=U[l][i][j][k]-(0.5*inv_vel)*(F[0][l][i+1][j][k]+F[1][l][i][j+1][k]+F[2][l][i][j][k+1]
-					-F[0][l][i-1][j][k]-F[1][l][i][j-1][k]-F[2][l][i][j][k-1]);
+	for( i = 2; i < N-2; i++){
+		for( j = 2; j < N-2; j++){
+			for( k = 2; k < N-2; k++){
+				for( l = 0; l < 5; l++){
+					FLOAT temp = get_axis_flux( i, j, k, 0, l )+get_axis_flux( i, j, k, 1, l )+get_axis_flux( i, j, k, 2, l );
+					U_new[l][i][j][k]=U[l][i][j][k]-(inv_vel)*temp;
 
 				}
 			}
@@ -272,9 +275,9 @@ FLOAT evolve(FLOAT inv_vel){
 	FLOAT rho,E,p;
 	FLOAT* v = malloc(3*sizeof(FLOAT));
 
-	for( i = 1; i < N-1; i++){
-		for( j = 1; j < N-1; j++){
-			for( k = 1; k < N-1; k++){
+	for( i = 2; i < N-2; i++){
+		for( j = 2; j < N-2; j++){
+			for( k = 2; k < N-2; k++){
 				for( l = 0; l < 5; l++){
 
 					// U is actualized
@@ -284,11 +287,14 @@ FLOAT evolve(FLOAT inv_vel){
 
 				// From auxiliar variable U to usual variables rho,p,E,v
 				rho  = U[0][i][j][k];
+				//if( rho < 0 ){ rho = 0; }
 				v[0] = U[1][i][j][k]/rho;
 				v[1] = U[2][i][j][k]/rho;
 				v[2] = U[3][i][j][k]/rho;
 				E    = U[4][i][j][k];
+				//if( E < 0 ){ E = 0; }
 				p    = (gamma-1)*(E-0.5*rho*(pow(v[0],2)+pow(v[1],2)+pow(v[2],2)));
+				//if( p < 0 ){ p = 0; }
 
 				// Calculates sound speed and verifies maximum for sound speed and velocities
 				FLOAT c_now = sqrt((gamma)*(p/rho));
@@ -314,6 +320,7 @@ FLOAT evolve(FLOAT inv_vel){
 					for( m = 1; m < 4; m++ ){
 
 						F[l][m][i][j][k] = rho*v[l]*v[m-1] + (l==(m-1))*p;
+						//printf("%d,%d,%d\n",(l==(m-1)),l,m-1);
 
 					}
 
@@ -342,7 +349,7 @@ FLOAT evolve(FLOAT inv_vel){
 	free(v);
 	
 	// RETURNS inverse of maximum velocity
-	return 1.0/(vmax+cmax);
+	return 10.0/(vmax+cmax);
 }
 
 
@@ -372,18 +379,19 @@ void get_radius(){
 	int i;
 	int maxind;
 	int maxrho = -1;
-	for ( i = N/2; i < N-2; i++){
+	for ( i = 2; i < N-2; i++){
 		fprintf(density,"%f,",U[0][i][N/2][N/2]);
-		fprintf(energy,"%f,",U[4][i][N/2][N/2]);
+		//fprintf(energy,"%f,",U[4][i][N/2][N/2]);
 		if( U[0][i][N/2][N/2] > maxrho ){
 			maxrho = U[0][i][N/2][N/2];
 			maxind = i;
 		}
 	}
 	fprintf(density,"%f\n",U[0][N-2][N/2][N/2]);
-	fprintf(energy,"%f\n",U[4][N-2][N/2][N/2]);
+	//fprintf(energy,"%f\n",U[4][N-2][N/2][N/2]);
 	// abs(maxind - N/2)*dx is the radius
 	radius = abs(maxind - N/2)*resol;
+	fprintf(times,"%f\n",time);
 
 }
 
@@ -431,25 +439,103 @@ void save(){
 		rhoprom[halfN]  = 0;
 	}
 	fprintf(density,"%f\n",rhoprom[halfN]);
+	fprintf(times,"%f\n",time);
 
 	
 	
-	//free(rhoprom);
-	//free(count);
+	free(rhoprom);
+	free(count);
 	//fprintf(energy,"%f\n",U[4][N-2][N/2][N/2]);
 	// abs(maxind - N/2)*dx is the radius
 	//radius = abs(maxind - N/2)*resol;
 
 }
 
+// gets area flux according to TVD-Roe scheme with superbee flux limiter
+// n is component from vectors u and F. Axis is the axis in which flux is going to be calculated
+// https://tspace.library.utoronto.ca/bitstream/1807/14332/1/MQ45872.pdf
+FLOAT get_axis_flux( int i, int j, int k, int axis, int n ){
+	// indices of the points ll(-2), l(-1), c(0), r(+1), rr(+2)
+	int** indices = malloc(5*sizeof(int*));
+	int l;
+	for( l = 0; l < 5; l++ ){
+		indices[l] = malloc(3*sizeof(int));
+		indices[l][0] = i;
+		indices[l][1] = j;
+		indices[l][2] = k;
+		indices[l][axis] += (l-2);
+	}
+	// f in i + 1/2
+	FLOAT rho_1 = sqrt(U[0][indices[2][0]][indices[2][1]][indices[2][2]]);
+	FLOAT rho_2 = sqrt(U[0][indices[3][0]][indices[3][1]][indices[3][2]]);
+	FLOAT f_12 = (rho_1*F[axis][n][indices[2][0]][indices[2][1]][indices[2][2]] + rho_2*F[axis][n][indices[3][0]][indices[3][1]][indices[3][2]])/(rho_1+rho_2);
+	// f in i + 3/2
+	rho_1 = sqrt(U[0][indices[3][0]][indices[3][1]][indices[3][2]]);
+	rho_2 = sqrt(U[0][indices[4][0]][indices[4][1]][indices[4][2]]);
+	FLOAT f_32 = (rho_1*F[axis][n][indices[3][0]][indices[3][1]][indices[3][2]] + rho_2*F[axis][n][indices[4][0]][indices[4][1]][indices[4][2]])/(rho_1+rho_2);
+	// f in i - 1/2
+	rho_1 = sqrt(U[0][indices[1][0]][indices[1][1]][indices[1][2]]);
+	rho_2 = sqrt(U[0][indices[2][0]][indices[2][1]][indices[2][2]]);
+	FLOAT f_m12 = (rho_1*F[axis][n][indices[1][0]][indices[1][1]][indices[1][2]] + rho_2*F[axis][n][indices[2][0]][indices[2][1]][indices[2][2]])/(rho_1+rho_2);
+	//  f in i - 3/2
+	rho_1 = sqrt(U[0][indices[0][0]][indices[0][1]][indices[0][2]]);
+	rho_2 = sqrt(U[0][indices[1][0]][indices[1][1]][indices[1][2]]);
+	FLOAT f_m32 = (rho_1*F[axis][n][indices[0][0]][indices[0][1]][indices[0][2]] + rho_2*F[axis][n][indices[1][0]][indices[1][1]][indices[1][2]])/(rho_1+rho_2);
+
+	// Calculates the ratios for flux limiter
+	// ratio + in i-1/2
+	FLOAT pr_m12 = (F[axis][n][indices[3][0]][indices[3][1]][indices[3][2]]-f_12)/(F[axis][n][indices[2][0]][indices[2][1]][indices[2][2]]-f_m12);
+	// ratio + in i-3/2
+	FLOAT pr_m32 = (F[axis][n][indices[2][0]][indices[2][1]][indices[2][2]]-f_m12)/(F[axis][n][indices[1][0]][indices[1][1]][indices[1][2]]-f_m32);
+	// ratio - in 1+1/2
+	FLOAT mr_12 = (F[axis][n][indices[1][0]][indices[1][1]][indices[1][2]]-f_m12)/(F[axis][n][indices[2][0]][indices[2][1]][indices[2][2]]-f_12);
+	// ratio + in i+3/2
+	FLOAT mr_32 = (F[axis][n][indices[2][0]][indices[2][1]][indices[2][2]]-f_12)/(F[axis][n][indices[3][0]][indices[3][1]][indices[3][2]]-f_32);
+	
+	// Contribution from r+ and r-
+	FLOAT temp1 = (1.0 + 0.5*flux_limiter(pr_m12) -0.5*flux_limiter(pr_m32)/(pr_m32))*(F[axis][n][indices[2][0]][indices[2][1]][indices[2][2]]-f_m12);
+	FLOAT temp2 = (1.0 + 0.5*flux_limiter(mr_12) -0.5*flux_limiter(mr_32)/(mr_32))*(f_12-F[axis][n][indices[2][0]][indices[2][1]][indices[2][2]]);
+	
+	for( l = 0; l < 5; l++ ){
+		free(indices[l]);
+	}
+	free(indices);
+	
+	if( pr_m32 == 0 || isnan(pr_m32) || isnan(pr_m12)  ){ temp1 = 0;}
+	if( mr_32 == 0 || isnan(mr_32) || isnan(mr_12) ){ temp2 = 0;}
+	return temp1+temp2;
 
 
+}
 
 
+// Flux limiter, superbee scheme max(0,min(1,2r),min(2,r))
+FLOAT flux_limiter( FLOAT r ){
+	//FLOAT min1, min2;
+	if( r >= 2 ){
+		//min1 = 1;
+		//min2 = 2;
+		return 2;
+	}
+	else if ( r>= 0.5 ){
+		//min1 = 1;
+		//min2 = r;
+		if( 1 >= r ){
+			return 1;
+		}
+		else{
+			return r;
+		}
+	} 
+	else if( r>= 0 ){
+		//min1 = r;
+		//min2 = 2*r;
+		return 2*r;
+		
+	}
+	return 0;		
 
-
-
-
+}
 
 
 
